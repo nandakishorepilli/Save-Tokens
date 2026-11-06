@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Save Tokens</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233a5bff'/%3E%3Cpath d='M8 10h16M8 16h11M8 22h6' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="shell">
+  <aside class="side">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8"/><path d="M8 10h16M8 16h11M8 22h6"/></svg>
+      <span>Save Tokens</span>
+    </div>
+    <nav class="nav" aria-label="Primary">
+      <button type="button" class="nav-item" data-view="workspace"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg><span>Workspace</span></button>
+      <button type="button" class="nav-item" data-view="compare"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h7v14H4zM13 5h7v14h-7z"/></svg><span>Compare</span></button>
+      <button type="button" class="nav-item" data-view="models"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M16.5 7.5C16.5 6 14.5 5 12 5S7.5 6 7.5 8s2 2.8 4.5 3.2 4.5 1.2 4.5 3.3-2 3-4.5 3-4.5-1-4.5-2.5"/></svg><span>Models &amp; cost</span></button>
+      <button type="button" class="nav-item" data-view="settings"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4"/></svg><span>Settings</span></button>
+    </nav>
+    <div class="side-foot"><span class="pill ok"><i class="dot"></i>Offline engine ready</span></div>
+  </aside>
+
+  <div class="main">
+    <header class="top">
+      <div class="titles"><h1 id="view-title">Workspace</h1><p id="view-sub" class="muted"></p></div>
+      <div class="model-pick"><label for="target-model">Target model</label><select id="target-model"></select><small id="model-hint" class="muted"></small></div>
+    </header>
+
+    <main id="main" tabindex="-1">
+      <!-- ================= Workspace ================= -->
+      <section id="view-workspace" class="view">
+        <div class="stats">
+          <article class="stat"><h3>Prompt tokens</h3><p class="big" id="st-tokens">–</p><p class="sub"><span class="badge" id="st-badge">No analysis yet</span> <span id="st-sub"></span></p></article>
+          <article class="stat"><h3>Potential savings</h3><p class="big" id="st-save">–</p><p class="sub" id="st-save-sub">Press Analyze to find out</p></article>
+          <article class="stat"><h3>Input cost · 1,000 calls</h3><p class="big" id="st-cost">–</p><p class="sub" id="st-cost-sub">Estimated from the target model's price</p></article>
+          <article class="stat"><h3>Est. monthly savings</h3><p class="big" id="st-month">–</p><p class="sub" id="st-month-sub"></p></article>
+        </div>
+
+        <div class="work">
+          <section class="card editor" aria-label="Prompt editor">
+            <div class="card-head">
+              <div class="seg" role="tablist" aria-label="Editor mode">
+                <button type="button" id="tab-edit" role="tab" aria-selected="true">Edit</button>
+                <button type="button" id="tab-marked" role="tab" aria-selected="false">Marked up</button>
+              </div>
+              <div class="head-actions"><button type="button" id="example" class="link">Load example</button><button type="button" id="clear" class="link">Clear</button></div>
+            </div>
+            <label class="sr" for="input">Prompt</label>
+            <textarea id="input" spellcheck="false" placeholder="Paste or type your prompt here. Analysis runs in your browser; nothing is sent anywhere."></textarea>
+            <div id="marked" class="marked" hidden></div>
+            <div id="legend" class="legend" hidden></div>
+            <div class="editor-foot">
+              <span class="meta" id="meta">0 characters · 0 words</span>
+              <div class="actions">
+                <button type="button" id="measure" class="btn ghost">Count exactly</button>
+                <button type="button" id="analyze" class="btn">Analyze</button>
+                <button type="button" id="optimize" class="btn primary">Optimize</button>
+              </div>
+            </div>
+            <p id="measure-status" class="status" role="status"></p>
+          </section>
+
+          <div class="col">
+            <section class="card" id="score-card" aria-label="Efficiency score"></section>
+            <section class="card" id="sugg-card" aria-label="Optimization suggestions"></section>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= Compare ================= -->
+      <section id="view-compare" class="view" hidden>
+        <div class="card toolbar">
+          <div class="seg" role="tablist" aria-label="Optimization source">
+            <button type="button" id="cmp-local" role="tab" aria-selected="true">Local optimization</button>
+            <button type="button" id="cmp-ai" role="tab" aria-selected="false">AI rewrite <span class="tag">optional</span></button>
+          </div>
+          <div id="cmp-chips" class="chips"></div>
+        </div>
+
+        <section id="ai-panel" class="card ai" hidden>
+          <div class="ai-row">
+            <div class="field"><label for="ai-provider">Provider</label><select id="ai-provider"></select></div>
+            <button type="button" id="ai-run" class="btn primary">Improve with AI</button>
+          </div>
+          <p id="ai-disclosure" class="callout"></p>
+          <p id="ai-status" class="status" role="status"></p>
+        </section>
+
+        <div id="cmp-empty" class="card empty" hidden></div>
+        <div id="cmp-body" hidden>
+          <div class="compare-grid">
+            <article class="card pane"><header><h3>Original</h3><span class="muted" id="cmp-orig-meta"></span></header><div id="cmp-orig" class="diff" tabindex="0"></div></article>
+            <article class="card pane"><header><h3 id="cmp-new-title">Optimized</h3><span class="muted" id="cmp-new-meta"></span></header><div id="cmp-new" class="diff" tabindex="0"></div>
+              <footer><button type="button" id="cmp-copy" class="btn ghost">Copy</button><button type="button" id="cmp-use" class="btn">Use as my prompt</button></footer></article>
+          </div>
+          <p id="cmp-guard" class="callout"></p>
+        </div>
+      </section>
+
+      <!-- ================= Models & cost ================= -->
+      <section id="view-models" class="view" hidden>
+        <div class="card">
+          <h2>Model pricing</h2>
+          <p class="note" id="pricing-note"></p>
+          <div class="table-wrap"><table id="price-table"><thead><tr><th>Model</th><th>Exact counting</th><th>Input $ / M tokens</th><th>Output $ / M tokens</th></tr></thead><tbody></tbody></table></div>
+          <div class="row-actions"><button type="button" id="price-reset" class="btn ghost">Reset prices to defaults</button><span id="price-status" class="muted" role="status"></span></div>
+        </div>
+        <div class="card">
+          <h2>Scenario</h2>
+          <div class="fields">
+            <div class="field"><label for="calls">Calls per month</label><input id="calls" type="number" min="0" step="1" inputmode="numeric"></div>
+            <div class="field"><label for="outtok">Expected output tokens per call</label><input id="outtok" type="number" min="0" step="1" inputmode="numeric"></div>
+          </div>
+          <p class="note">Trimming a prompt only changes <b>input</b> tokens, so savings below exclude output. Token counts for this table are heuristic estimates for every model, because a measured count is valid only for one model.</p>
+          <div class="table-wrap"><table id="scenario-table"><thead><tr><th>Model</th><th>Cost / call (original)</th><th>Cost / call (optimized)</th><th>Saved / month</th></tr></thead><tbody></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- ================= Settings ================= -->
+      <section id="view-settings" class="view" hidden>
+        <div class="card">
+          <h2>Privacy at a glance</h2>
+          <ul class="plain">
+            <li><b>Analysis, scoring, local optimization and cost estimates</b> run in your browser and need no key or network.</li>
+            <li><b>Nothing is sent anywhere</b> unless you click <i>Count exactly</i> or <i>Improve with AI</i>. Both go through your local server, which holds any API keys. Keys are never sent to the browser.</li>
+            <li>Preferences (model, prices, theme) are stored in this browser only.</li>
+          </ul>
+        </div>
+        <div class="grid-cards" id="provider-cards"></div>
+        <div class="card">
+          <h2>Appearance</h2>
+          <div class="seg" role="radiogroup" aria-label="Colour theme"><button type="button" role="radio" data-theme-choice="auto">Auto</button><button type="button" role="radio" data-theme-choice="light">Light</button><button type="button" role="radio" data-theme-choice="dark">Dark</button></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+<template id="tpl-count-off">Optional. Add your Anthropic API key to <code>.env</code> (see <code>.env.example</code>) and restart the server to enable exact counts for Claude models. Without it, counts are labelled <b>estimated</b>.</template>
+<template id="tpl-tok-off">Optional. Installing a tokenizer package (<code>npm install gpt-tokenizer</code>) adds an exact, fully local count for the OpenAI o200k encoding. Nothing is required for basic use.</template>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

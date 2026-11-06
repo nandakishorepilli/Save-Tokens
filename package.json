@@ -1,0 +1,15 @@
+{
+  "name": "save-tokens",
+  "version": "4.0.0",
+  "description": "Find wasted tokens in your prompts, estimate cost, and trim them. Offline first; every external call is optional and user-triggered.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "verify:live": "node scripts/verify-live.mjs"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}
