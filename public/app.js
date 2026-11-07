@@ -1,4 +1,4 @@
-import { analyze, optimize, countTokens, estimateTokens, lostRequirements, recommendedIds, KINDS } from './core.js';
+import { analyze, optimize, countTokens, estimateTokens, lostRequirements, recommendedIds, measureSavings, KINDS } from './core.js';
 import { createCounting } from './counting.js';
 import { createRewriter } from './rewrite.js';
 import { diffWords } from './diff.js';
@@ -13,7 +13,7 @@ const storage = (() => { try { const s = window.localStorage; s.getItem('x'); re
 const prefs = loadPrefs(storage);
 const counting = createCounting(), rewriter = createRewriter();
 let models = buildModels([], prefs.pricing);
-const state = { text: '', aText: '', analyzed: false, result: null, chosen: new Set(), opt: null, view: 'workspace', cmpTab: 'local', ai: null, busy: { measure: false, ai: false }, marked: false };
+const state = { text: '', aText: '', analyzed: false, result: null, chosen: new Set(), opt: null, baseline: null, view: 'workspace', cmpTab: 'local', ai: null, busy: { measure: false, ai: false }, marked: false };
 const VIEWS = {
   workspace: ['Workspace', 'Write a prompt, find what it wastes, and trim it.'], compare: ['Compare', 'Original and optimized prompts, side by side.'],
   models: ['Models & cost', 'Configurable pricing and what your prompt costs.'], settings: ['Settings', 'Providers, privacy and appearance.'],
@@ -75,6 +75,18 @@ function renderMeta() {
   $('meta').textContent = `${nf.format([...t].length)} characters · ${nf.format((t.match(/\S+/g) || []).length)} words`;
 }
 
+// Achieved savings exist only after a version was adopted ("Use as my prompt"). They are recounted from the ORIGINAL and the
+// adopted text with the same counter, and shown only while the editor still holds exactly the adopted text.
+function renderAchieved() {
+  const el = $('st-achieved'), b = state.baseline;
+  if (!b || b.adopted === b.original || $('input').value !== b.adopted) { el.hidden = true; return; }
+  const m = measureSavings(b.original, b.adopted, { counter: counting.counter }), mark = m.kind === 'estimated' ? '~' : '';
+  el.textContent = m.saved > 0 ? `Achieved: ${mark}${nf.format(m.saved)} fewer tokens (${nf.format(m.before)} → ${nf.format(m.after)}, ${m.kind}) vs your original`
+    : m.saved === 0 ? `No change in tokens vs your original (${nf.format(m.before)}, ${m.kind})`
+    : `Result: ${mark}${nf.format(-m.saved)} MORE tokens than your original (${nf.format(m.before)} → ${nf.format(m.after)}, ${m.kind})`;
+  el.hidden = false;
+}
+
 function renderStats() {
   const set = (id, v) => { $(id).textContent = v; };
   const r = state.result, o = state.opt, m = cur();
@@ -82,6 +94,7 @@ function renderStats() {
     set('st-tokens', '–'); set('st-save', '–'); set('st-cost', '–'); set('st-month', '–');
     const b = $('st-badge'); b.className = 'badge'; b.textContent = 'No analysis yet'; b.title = ''; set('st-sub', '');
     set('st-save-sub', 'Press Analyze to find out'); set('st-cost-sub', "Estimated from the target model's price"); set('st-month-sub', `At ${nf.format(prefs.calls)} calls a month`);
+    $('st-achieved').hidden = true;
     return;
   }
   const t = r.tokens, est = t.kind === 'estimated';
@@ -92,13 +105,15 @@ function renderStats() {
   set('st-sub', !t.count ? '' : est ? `likely ${nf.format(t.low)}–${nf.format(t.high)}` : `${nf.format(r.stats.words)} words`);
   if (o) {
     set('st-save', `${o.saved > 0 ? (o.kind === 'estimated' ? '~' : '') : ''}${nf.format(Math.max(0, o.saved))} tokens`);
-    set('st-save-sub', `${o.before ? Math.max(0, Math.round((o.saved / o.before) * 100)) : 0}% of the prompt · ${o.kind}`);
+    const all = r.potential && r.potential.all.tokens > o.saved ? ` · all suggestions together: ~${nf.format(r.potential.all.tokens)}` : '';
+    set('st-save-sub', `${o.before ? Math.max(0, Math.round((o.saved / o.before) * 100)) : 0}% of the prompt · ${o.kind} · if you apply the selected edits${all}`);
   }
+  renderAchieved();
   const price = m.price, c = estimateCost({ tokens: t.count, outputTokens: prefs.out, price });
   set('st-cost', c ? fmtUSD(c.total * 1000) : '–');
   set('st-cost-sub', !price ? 'No price set: add one in Models & cost' : price.in === 0 && price.out === 0 ? 'Free tier ($0), rate-limited' : `${fmtUSD(price.in)}/M in${prefs.out ? ` + ${fmtUSD(price.out)}/M out` : ''} · ${est ? 'estimated' : 'measured'} tokens`);
   const s = o ? projectSavings({ before: o.before, after: o.after, calls: prefs.calls, price }) : null;
-  set('st-month', s ? fmtUSD(s.perMonth) : '–'); set('st-month-sub', s ? `At ${nf.format(prefs.calls)} calls a month · input only` : 'Set a price to see this');
+  set('st-month', s ? fmtUSD(s.perMonth) : '–'); set('st-month-sub', s ? `If applied · at ${nf.format(prefs.calls)} calls a month · input only` : 'Set a price to see this');
 }
 
 function renderScore() {
@@ -194,15 +209,16 @@ function renderCompare() {
     }
     return;
   }
-  const before = c.source === 'local' ? state.opt.before : estimateTokens(c.orig), after = c.source === 'local' ? state.opt.after : estimateTokens(c.text);
-  const kind = c.source === 'local' ? state.opt.kind : 'estimated', saved = before - after, m = cur();
+  const ms = measureSavings(c.orig, c.text, { counter: counting.counter }); // both texts recounted with the same counter or estimator
+  const before = ms.before, after = ms.after, kind = ms.kind, saved = ms.saved, m = cur();
   const sv = projectSavings({ before, after, calls: prefs.calls, price: m.price });
   const lost = lostRequirements(c.orig, c.text), parts = diffWords(c.orig, c.text);
   $('cmp-chips').innerHTML = [
-    `<span class="chip ${saved > 0 ? 'good' : 'warn'}">${nf.format(before)} → ${nf.format(after)} tokens (${saved > 0 ? '−' : saved < 0 ? '+' : ''}${nf.format(Math.abs(saved))}${before ? `, ${Math.abs(Math.round((saved / before) * 100))}%` : ''})</span>`,
+    `<span class="chip ${saved > 0 ? 'good' : 'warn'}">${c.source === 'ai' ? 'AI rewrite' : 'Optimized version'}: ${nf.format(before)} → ${nf.format(after)} tokens (${saved > 0 ? '−' : saved < 0 ? '+' : ''}${nf.format(Math.abs(saved))}${before ? `, ${Math.abs(Math.round((saved / before) * 100))}%` : ''})</span>`,
     `<span class="badge ${kind === 'estimated' ? 'est' : 'ok'}">${kind === 'estimated' ? 'Estimated' : 'Measured'}</span>`,
+    '<span class="badge">Not applied to your prompt yet</span>',
     c.source === 'ai' ? '<span class="badge ai">AI suggestion</span>' : '',
-    sv && m.price ? `<span class="chip">Saves ${fmtUSD(sv.per1k)} / 1,000 calls</span>` : '',
+    sv && m.price && saved > 0 ? `<span class="chip">Would save ${fmtUSD(sv.per1k)} / 1,000 calls</span>` : '',
   ].join('');
   $('cmp-orig').innerHTML = diffHtml(parts, 'orig'); $('cmp-new').innerHTML = diffHtml(parts, 'new');
   $('cmp-orig-meta').textContent = `${nf.format([...c.orig].length)} characters`; $('cmp-new-meta').textContent = `${nf.format([...c.text].length)} characters`;
@@ -214,7 +230,7 @@ function renderCompare() {
   } else {
     const o = state.opt, skipped = o.skipped.length ? ` Not applied: ${o.skipped.map((s) => s.reason).join('; ')}.` : '';
     g.className = `callout ${o.verification.preserved && !lost.length ? 'good' : 'bad'}`;
-    g.textContent = (o.applied.length ? `${o.applied.length} edit${o.applied.length === 1 ? '' : 's'} applied. ` : `${NO_CHANGE[o.reason] || 'No edits were applied.'} `) + `Requirements check: all ${o.verification.requirements} constraint markers in your prompt are still present.${skipped}`;
+    g.textContent = (o.applied.length ? `This version applies ${o.applied.length} edit${o.applied.length === 1 ? '' : 's'}. ` : `${NO_CHANGE[o.reason] || 'No edits were applied.'} `) + `Requirements check: all ${o.verification.requirements} constraint markers in your prompt are still present.${skipped}`;
   }
   $('cmp-use').textContent = lost.length ? 'Use anyway' : 'Use as my prompt'; $('cmp-use').className = `btn ${lost.length ? 'danger' : ''}`;
 }
@@ -312,11 +328,11 @@ $('optimize').onclick = () => {
   if (!state.analyzed || state.aText !== $('input').value) runAnalysis();
   state.cmpTab = 'local'; go('compare');
   const n = state.opt ? state.opt.applied.length : 0;
-  toast(n ? `Applied ${n} edit${n === 1 ? '' : 's'}: saved ${state.opt.saved > 0 ? (state.opt.kind === 'estimated' ? '~' : '') + state.opt.saved : 0} tokens.` : (NO_CHANGE[state.opt?.reason] || 'No edits were applied.'), n ? 'good' : 'info');
+  toast(n ? `Optimized version ready: ${n} edit${n === 1 ? '' : 's'}, ${state.opt.kind === 'estimated' ? 'about ' : ''}${state.opt.saved > 0 ? state.opt.saved : 0} fewer tokens if you use it. Your prompt is unchanged until you press Use as my prompt.` : (NO_CHANGE[state.opt?.reason] || 'No edits were applied.'), n ? 'good' : 'info');
 };
 $('measure').onclick = measure;
-$('example').onclick = () => { $('input').value = EXAMPLE; state.ai = null; runAnalysis(); state.marked = false; $('tab-edit').click(); };
-$('clear').onclick = () => { $('input').value = ''; Object.assign(state, { text: '', aText: '', analyzed: false, result: null, opt: null, ai: null, chosen: new Set() }); setStatus('measure-status', ''); renderAll(); $('input').focus(); };
+$('example').onclick = () => { $('input').value = EXAMPLE; state.ai = null; state.baseline = null; runAnalysis(); state.marked = false; $('tab-edit').click(); };
+$('clear').onclick = () => { $('input').value = ''; Object.assign(state, { text: '', aText: '', analyzed: false, result: null, opt: null, ai: null, baseline: null, chosen: new Set() }); setStatus('measure-status', ''); renderAll(); $('input').focus(); };
 $('tab-edit').onclick = () => { state.marked = false; $('input').hidden = false; $('marked').hidden = true; $('tab-edit').setAttribute('aria-selected', 'true'); $('tab-marked').setAttribute('aria-selected', 'false'); renderMarked(); };
 $('tab-marked').onclick = () => { if ($('input').value.trim() && (!state.analyzed || state.aText !== $('input').value)) runAnalysis(); state.marked = true; $('input').hidden = true; $('marked').hidden = false; $('tab-edit').setAttribute('aria-selected', 'false'); $('tab-marked').setAttribute('aria-selected', 'true'); renderMarked(); };
 
@@ -339,7 +355,14 @@ $('cmp-ai').onclick = () => { state.cmpTab = 'ai'; renderCompare(); };
 $('ai-run').onclick = improveWithAi;
 $('ai-provider').onchange = renderAiPanel;
 $('cmp-copy').onclick = async () => { const c = candidate(); if (!c) return; try { await navigator.clipboard.writeText(c.text); toast('Copied to the clipboard.', 'good'); } catch { toast('Copy failed. Select the text and copy it manually.', 'error'); } };
-$('cmp-use').onclick = () => { const c = candidate(); if (!c) return; $('input').value = c.text; state.ai = null; runAnalysis(); go('workspace'); toast('Prompt replaced. Analysis updated.', 'good'); };
+$('cmp-use').onclick = () => {
+  const c = candidate(); if (!c) return;
+  const prev = state.baseline, original = prev && prev.adopted === c.orig ? prev.original : c.orig; // keep measuring against the very first prompt while you keep optimizing
+  $('input').value = c.text; state.ai = null; state.baseline = { original, adopted: c.text };
+  runAnalysis(); go('workspace');
+  const m = measureSavings(original, c.text, { counter: counting.counter });
+  toast(`Prompt replaced. Recounted against your original: ${nf.format(m.before)} → ${nf.format(m.after)} tokens (${m.saved > 0 ? '−' : m.saved < 0 ? '+' : ''}${nf.format(Math.abs(m.saved))}, ${m.kind}).`, m.saved >= 0 ? 'good' : 'info');
+};
 
 $('target-model').onchange = () => { prefs.model = $('target-model').value; save(); syncCounting(); refreshCounts(); renderAll(); };
 $('price-table').tBodies[0].addEventListener('change', (e) => {

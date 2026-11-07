@@ -152,3 +152,5 @@ td .mn{display:block;font-size:.76rem;color:var(--mute)}td.num{font-variant-nume
   .score-head{flex-direction:column;align-items:flex-start}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+.good-text{color:var(--ok);font-weight:600}

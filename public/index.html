@@ -36,7 +36,7 @@
       <section id="view-workspace" class="view">
         <div class="stats">
           <article class="stat"><h3>Prompt tokens</h3><p class="big" id="st-tokens">–</p><p class="sub"><span class="badge" id="st-badge">No analysis yet</span> <span id="st-sub"></span></p></article>
-          <article class="stat"><h3>Potential savings</h3><p class="big" id="st-save">–</p><p class="sub" id="st-save-sub">Press Analyze to find out</p></article>
+          <article class="stat"><h3>Potential savings</h3><p class="big" id="st-save">–</p><p class="sub" id="st-save-sub">Press Analyze to find out</p><p class="sub good-text" id="st-achieved" hidden></p></article>
           <article class="stat"><h3>Input cost · 1,000 calls</h3><p class="big" id="st-cost">–</p><p class="sub" id="st-cost-sub">Estimated from the target model's price</p></article>
           <article class="stat"><h3>Est. monthly savings</h3><p class="big" id="st-month">–</p><p class="sub" id="st-month-sub"></p></article>
         </div>
@@ -116,8 +116,8 @@
             <div class="field"><label for="calls">Calls per month</label><input id="calls" type="number" min="0" step="1" inputmode="numeric"></div>
             <div class="field"><label for="outtok">Expected output tokens per call</label><input id="outtok" type="number" min="0" step="1" inputmode="numeric"></div>
           </div>
-          <p class="note">Trimming a prompt only changes <b>input</b> tokens, so savings below exclude output. Token counts for this table are heuristic estimates for every model, because a measured count is valid only for one model.</p>
-          <div class="table-wrap"><table id="scenario-table"><thead><tr><th>Model</th><th>Cost / call (original)</th><th>Cost / call (optimized)</th><th>Saved / month</th></tr></thead><tbody></tbody></table></div>
+          <p class="note">Trimming a prompt only changes <b>input</b> tokens, so the savings below are projections if you apply the optimization, and they exclude output. Token counts for this table are heuristic estimates for every model, because a measured count is valid only for one model.</p>
+          <div class="table-wrap"><table id="scenario-table"><thead><tr><th>Model</th><th>Cost / call (original)</th><th>Cost / call (optimized)</th><th>Est. saving / month (if applied)</th></tr></thead><tbody></tbody></table></div>
         </div>
       </section>
 

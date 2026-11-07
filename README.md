@@ -6,7 +6,7 @@ Find what your prompts waste, see what they cost, and trim them. **Free-first:**
 
 ## Run
     npm start        # http://localhost:5173  (set PORT to change)
-    npm test         # 127 tests; no network, no keys needed
+    npm test         # 140 tests; no network, no keys needed
 
 Requires Node 20+. No dependencies, no build step. Optional extras: `cp .env.example .env` and fill in what you want.
 
@@ -81,6 +81,13 @@ Each edit has one of three levels, and **Optimize applies every *recommended* ed
 - These appear as ordinary checkboxes in the suggestion list (kind *Repetition*), are underlined in *Marked up*, and are applied by Optimize like any other edit.
 - Safety nets at apply time: each suggestion is re-checked to still be purely style wording, and a style concept can never disappear from the prompt entirely, even if several suggestions that rely on each other are ticked (the offending ones are reverted and reported).
 
+**One source of truth for repetition.** The score, the findings list and the suggestions all read the same repetition findings. The *Repetition* row of the score breaks them down as `repeated sentences + restated ideas (the semantic detector) = tokens of the whole prompt`, plus near-duplicate/conflict advice, and says when the −30 cap hides the effect of fixing only part of it. Opt-in suggestions (for example `I am a beginner.`) count in the score even though they are not pre-selected; applying every repetition finding drives the penalty to 0. `analyze()` exposes the same numbers as `repetition` and `criteria[].parts`.
+
+**Potential vs achieved savings.** These are different things and are never mixed:
+- **Potential (estimated, before you change anything).** What the selected edits would save, shown on the *Potential savings* card ("if you apply the selected edits", plus "all suggestions together") and in Compare ("Optimized version … Not applied to your prompt yet", "Would save …"). `analyze().potential` has `{ basis: 'potential', recommended, all }`, each recounted from the would-be text rather than summed from per-edit guesses.
+- **Achieved (after you adopt a version).** Pressing **Use as my prompt** remembers your original and recounts *original vs adopted* with `measureSavings()`, the same counter or estimator for both texts; the card then shows "Achieved: … vs your original" and a toast repeats the recount. It is shown only while the editor still holds exactly the adopted text (edit it and it disappears; revert and it returns), chains to your *first* original if you keep optimizing, and resets on Clear and Load example. Optimize on its own only previews: it never changes your prompt and never claims savings.
+- Both are labelled estimated or measured by the counter used; a measured count is never subtracted from an estimate (if only one text can be measured, both fall back to the estimator).
+
 **Accurate numbers.** Reported before/after/saved come from running the same counter on the whole original and the whole optimized text (measured only if both were measured), and each edit's saving is measured on the whole text too, so the per-edit numbers add up to the total. An edit that would add tokens is refused. When nothing changes you are told why: `already_lean`, `review_only`, `nothing_selected` or `all_skipped`. `optimizePrompt(text)` in `core.js` runs analyze → apply recommended → repeat until stable (max 3 passes) and reports the end-to-end reduction.
 
 Limits: the concept lexicon is small and English-only, so unlisted wording (`anyone can follow it`, `for people with no background`) is not recognised; style clauses in the *middle* of a sentence are not cut; and word-containment is a heuristic, not understanding. It can miss paraphrases that share few words, and it can only be wrong in the direction of removing a sentence whose words and requirement markers are all present in another one; the requirements check and the diff in Compare are there for you to confirm. Rules are English-only.
@@ -89,7 +96,7 @@ Limits: the concept lexicon is small and English-only, so unlisted wording (`any
 Only edits are applied; advice never is. Code, quoted text, URLs, `{{variables}}` and `<tags>` are never edited. Requirement markers (negations, limits, numbers, formats, quoted strings, URLs, identifiers) are tracked; an edit that would lose one is protected or reverted and reported. Edits in sentences that state requirements start unchecked.
 
 ## Verification status (read this)
-- **Automated (`npm test`, 127 tests, 126 pass, 1 skipped):** analysis engine, pricing and diff maths, server API, provider adapters, error mapping, rate limits, secret-leak checks that spawn the real server, client modules, and static UI contract checks. All use mocked upstreams.
+- **Automated (`npm test`, 140 tests, 139 pass, 1 skipped):** analysis engine, pricing and diff maths, server API, provider adapters, error mapping, rate limits, secret-leak checks that spawn the real server, client modules, and static UI contract checks. All use mocked upstreams.
 - **Browser:** the UI was exercised in a headless browser against the real server with local stand-ins for Anthropic and Gemini (offline, keyed, failing and dropped-requirement scenarios; three viewport sizes; no horizontal overflow or console errors). Screenshots are in `docs/screenshots/`.
 - **Not verified here:** the live Anthropic, Gemini and Hugging Face APIs, a running Ollama, and the `gpt-tokenizer` package (no network or keys were available, and packages cannot be installed offline). Verify with your own configuration:
 

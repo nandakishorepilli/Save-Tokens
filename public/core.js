@@ -74,6 +74,19 @@ export function countTokens(text, counter) {
   return estimateRange(text);
 }
 
+/** Savings between two texts, both counted with the SAME counter or estimator, so the figure is a real recount of
+ *  the original and the optimized prompt, never a sum of per-edit guesses. A measured count is never subtracted
+ *  from an estimate: if only one text can be measured, both fall back to the estimator. */
+export function measureSavings(original, optimized, opts = {}) {
+  original = String(original ?? ''); optimized = String(optimized ?? '');
+  let b = countTokens(original, opts.counter), a = countTokens(optimized, opts.counter);
+  if (b.kind !== a.kind) { b = estimateRange(original); a = estimateRange(optimized); }
+  const saved = b.count - a.count;
+  return { before: b.count, after: a.count, saved, percent: b.count ? Math.round((saved / b.count) * 1000) / 10 : 0, kind: b.kind, method: b.method,
+    ...(b.kind === 'measured' && { provider: b.provider, model: b.model }),
+    chars: { before: [...original].length, after: [...optimized].length, saved: [...original].length - [...optimized].length, kind: 'measured' } };
+}
+
 // ---------------------------------------------------------------- requirements (what must survive optimisation)
 const REQ = [
   ['w', /\b(?:must not|must|never|always|only|do not|don't|dont|should not|shouldn't|cannot|can't|required|mandatory|exactly|at least|at most|no more than|no fewer than|no less than|fewer than|less than|more than|up to|maximum|minimum|limit|under|within|between|avoid|without|ensure|forbidden|prohibited|unless|except|not|no)\b/gi],
@@ -350,14 +363,21 @@ export function analyze(input, opts = {}) {
   const wordT = sum((f) => f.kind === 'wordiness' || f.kind === 'tone'), dupT = sum((f) => f.kind === 'repetition'), wsT = sum((f) => f.kind === 'whitespace');
   const advRep = count((f) => f.kind === 'repetition' && f.advisory && f.severity === 'warn');
   const vagueN = count((f) => f.kind === 'vague'), ctxPenalty = signals.reduce((s, x) => s + x.penalty, 0);
-  const row = (id, label, raw, max, evidence, detail) => ({ id, label, penalty: Math.round(Math.min(max, raw)), max, evidence, detail });
+  const row = (id, label, raw, max, evidence, detail) => ({ id, label, penalty: Math.round(Math.min(max, raw)), max, evidence,
+    detail: raw > max ? `${detail}. Capped at −${max}, so fixing only part of it may not change the score yet` : detail });
+  // One source of truth: the score, the findings list and the suggestions all read the same repetition findings.
+  const sumSaved = (list) => list.reduce((s, f) => s + f.saved, 0);
+  const repAll = findings.filter((f) => f.kind === 'repetition'), repSem = repAll.filter((f) => f.semantic && !f.advisory), repExact = repAll.filter((f) => !f.semantic && !f.advisory);
+  const repetition = { exact: { count: repExact.length, tokens: sumSaved(repExact) }, semantic: { count: repSem.length, tokens: sumSaved(repSem), recommended: repSem.filter((f) => f.recommended).length },
+    advice: { count: advRep }, tokens: dupT };
   const criteria = [
     row('wording', 'Removable wording', 2.5 * pct(wordT), 60, count((f) => !f.advisory && (f.kind === 'wordiness' || f.kind === 'tone')), `${wordT} of ~${base} estimated tokens (${pct(wordT).toFixed(1)}%) are filler, courtesy or wordy phrasing; 2.5 points per 1%`),
-    row('repetition', 'Repetition', 2.5 * pct(dupT) + 3 * advRep, 30, count((f) => f.kind === 'repetition' && f.severity !== 'info'), `${dupT} estimated tokens in exact repeats (2.5 points per 1%) plus ${advRep} near-duplicate or conflicting sentence(s) at 3 points each`),
+    row('repetition', 'Repetition', 2.5 * pct(dupT) + 3 * advRep, 30, count((f) => f.kind === 'repetition' && f.severity !== 'info'), `${repetition.exact.count} repeated sentence(s) (${repetition.exact.tokens} tokens) + ${repetition.semantic.count} restated idea(s) (${repetition.semantic.tokens} tokens) = ${dupT} of ~${base} estimated tokens (${pct(dupT).toFixed(1)}%) at 2.5 points per 1%, plus ${advRep} near-duplicate or conflicting sentence(s) at 3 points each`),
     row('whitespace', 'Whitespace', 2.5 * pct(wsT), 10, count((f) => f.kind === 'whitespace'), `${wsT} estimated tokens in blank lines and spaces; 2.5 points per 1%`),
     row('clarity', 'Vague instructions', 4 * vagueN, 20, vagueN, `${vagueN} vague phrase(s) at 4 points each`),
     row('context', 'Missing context', ctxPenalty, 15, signals.filter((s) => s.penalty).length, `${signals.filter((s) => s.penalty).length} missing-context problem(s); 8 points for no task or missing pasted content, 5 for an unfilled placeholder`),
   ];
+  criteria.find((c) => c.id === 'repetition').parts = repetition;
   const score = base < 8 ? null : Math.max(0, 100 - criteria.reduce((s, c) => s + c.penalty, 0));
   const label = score === null ? 'Too short to score' : score >= 90 ? 'Lean' : score >= 75 ? 'Fair' : score >= 50 ? 'Padded' : 'Heavily padded';
 
@@ -366,7 +386,9 @@ export function analyze(input, opts = {}) {
   if (letters.length && letters.filter((c) => !LATIN.test(c)).length / letters.length > 0.3) notes.push('Rules are English-only: this prompt gets whitespace and exact-repeat checks, little else.');
   if (tokens.counterFailed) notes.push('The supplied token counter failed, so token numbers are estimates.');
   notes.push('Findings are offline rule-based checks. They do not judge answer quality.');
-  return { tokens, stats: measure(text), findings, signals, waste, ratio, byKind, criteria, score, label, notes, engine: ENGINE };
+  const would = (ids) => { const o = optimize(text, findings, ids, { counter: opts.counter }); return { tokens: o.saved, percent: o.percent, kind: o.kind }; };
+  const potential = { basis: 'potential', all: would(new Set(findings.filter((f) => !f.advisory).map((f) => f.id))), recommended: would(recommendedIds(findings)) };
+  return { tokens, stats: measure(text), findings, signals, waste, ratio, byKind, criteria, repetition, potential, score, label, notes, engine: ENGINE };
 }
 
 function contextSignals(text) {
@@ -451,13 +473,10 @@ export function optimize(text, findings, ids, opts = {}) {
     chosen = keep; out = applyEdits(text, chosen);
     if (missing(need, out).length) { for (const f of chosen) skipped.push({ id: f.id, reason: 'Together these edits would remove a requirement' }); chosen = []; out = text; }
   }
-  // before and after must be the same kind: never subtract a measured count from an estimate
-  let b = countTokens(text, opts.counter), a = countTokens(out, opts.counter);
-  if (b.kind !== a.kind) { b = estimateRange(text); a = estimateRange(out); }
+  const m = measureSavings(text, out, opts); // recounted from the original and the optimized text with the same counter
   const actionable = findings.filter((f) => !f.advisory), picked = actionable.filter((f) => ids.has(f.id));
   const reason = chosen.length ? 'optimized' : !actionable.length ? 'already_lean' : !picked.length ? (actionable.some((f) => f.recommended) ? 'nothing_selected' : 'review_only') : 'all_skipped';
-  return { text: out, reason, before: b.count, after: a.count, saved: b.count - a.count, kind: b.kind,
-    method: b.method, ...(b.kind === 'measured' && { provider: b.provider, model: b.model }), chars: { before: [...text].length, after: [...out].length, saved: [...text].length - [...out].length, kind: 'measured' },
+  return { text: out, reason, ...m,
     applied: chosen.map((f) => ({ id: f.id, original: f.original, replacement: f.replacement })), skipped, warnings: skipped.map((s) => s.reason),
     verification: { requirements: need.size, preserved: missing(need, out).length === 0 } };
 }
@@ -478,10 +497,8 @@ export function optimizePrompt(input, opts = {}) {
     if (!o.applied.length || o.text === cur) break;
     applied = applied.concat(o.applied); cur = o.text; passes++;
   }
-  let b = countTokens(original, opts.counter), a = countTokens(cur, opts.counter);
-  if (b.kind !== a.kind) { b = estimateRange(original); a = estimateRange(cur); }
+  const m = measureSavings(original, cur, opts);
   const outcome = cur !== original ? 'optimized' : first.reason === 'already_lean' ? 'already_lean' : first.findings.some((f) => !f.advisory && !f.recommended) ? 'review_only' : 'already_lean';
-  return { text: cur, outcome, passes, applied, skipped, before: b.count, after: a.count, saved: b.count - a.count, kind: b.kind, method: b.method,
-    chars: { before: [...original].length, after: [...cur].length, saved: [...original].length - [...cur].length, kind: 'measured' },
+  return { text: cur, outcome, passes, applied, skipped, ...m,
     verification: { requirements: requirementItems(original).size, preserved: missing(requirementItems(original), cur).length === 0 } };
 }
