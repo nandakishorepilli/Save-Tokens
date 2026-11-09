@@ -2,7 +2,8 @@ import { analyze, optimize, countTokens, estimateTokens, lostRequirements, recom
 import { createCounting } from './counting.js';
 import { createRewriter } from './rewrite.js';
 import { diffWords } from './diff.js';
-import { buildModels, estimateCost, projectSavings, fmtUSD, loadPrefs, savePrefs, DEFAULT_PREFS, PRICING_AS_OF, PRICING_NOTE } from './models.js';
+import { buildModels, estimateCost, projectSavings, fmtUSD, loadPrefs, savePrefs, DEFAULT_PREFS, PRICING_AS_OF, PRICING_NOTE, EFFORT_NOTE, PRICING_STATUS, CONFIDENCE,
+  providersOf, modelsOf, resolveSelection, selectProvider, selectModel, selectEffort, tokenBasis, pricingLine, modelIdLine } from './models.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -27,7 +28,8 @@ Please note that you should not invent quotes. Return the summary as five bullet
 
 Thank you in advance for your help.`;
 
-const cur = () => models.find((m) => m.id === prefs.model) || models[0];
+const sel = () => resolveSelection(models, prefs);   // provider -> model -> effort, falling back safely for old saved preferences
+const cur = () => sel().profile;
 const save = () => savePrefs(storage, prefs);
 const emptyIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h10M5 17h6"/><circle cx="18" cy="17" r="3"/></svg>';
 
@@ -100,9 +102,10 @@ function renderStats() {
   const t = r.tokens, est = t.kind === 'estimated';
   set('st-tokens', (est && t.count ? '~' : '') + nf.format(t.count));
   const b = $('st-badge'); b.className = `badge ${est ? 'est' : 'ok'}`;
-  b.textContent = est ? 'Estimated' : `Measured · ${t.provider === 'local' ? 'local tokenizer' : 'Anthropic'}`;
-  b.title = t.caveat || (est ? 'Heuristic estimate, not a tokenizer. Use Count exactly where available.' : '');
-  set('st-sub', !t.count ? '' : est ? `likely ${nf.format(t.low)}–${nf.format(t.high)}` : `${nf.format(r.stats.words)} words`);
+  const basis = tokenBasis(m, t.kind, counting.route);
+  b.textContent = est ? (basis.level === 'fallback' ? 'Estimated · fallback' : 'Estimated') : `Measured · ${t.provider === 'local' ? 'local tokenizer' : 'Anthropic'}`;
+  b.title = t.caveat || `${basis.label}. ${basis.detail}`;
+  set('st-sub', !t.count ? '' : est ? `likely ${nf.format(t.low)}–${nf.format(t.high)}${basis.level === 'fallback' ? ' · no verified tokenizer for this model' : ''}` : `${nf.format(r.stats.words)} words`);
   if (o) {
     set('st-save', `${o.saved > 0 ? (o.kind === 'estimated' ? '~' : '') : ''}${nf.format(Math.max(0, o.saved))} tokens`);
     const all = r.potential && r.potential.all.tokens > o.saved ? ` · all suggestions together: ~${nf.format(r.potential.all.tokens)}` : '';
@@ -111,9 +114,9 @@ function renderStats() {
   renderAchieved();
   const price = m.price, c = estimateCost({ tokens: t.count, outputTokens: prefs.out, price });
   set('st-cost', c ? fmtUSD(c.total * 1000) : '–');
-  set('st-cost-sub', !price ? 'No price set: add one in Models & cost' : price.in === 0 && price.out === 0 ? 'Free tier ($0), rate-limited' : `${fmtUSD(price.in)}/M in${prefs.out ? ` + ${fmtUSD(price.out)}/M out` : ''} · ${est ? 'estimated' : 'measured'} tokens`);
+  set('st-cost-sub', !price ? pricingLine(m) : `${pricingLine(m)} · ${est ? 'estimated' : 'measured'} tokens${prefs.out ? ' + your expected output' : ''}`);
   const s = o ? projectSavings({ before: o.before, after: o.after, calls: prefs.calls, price }) : null;
-  set('st-month', s ? fmtUSD(s.perMonth) : '–'); set('st-month-sub', s ? `If applied · at ${nf.format(prefs.calls)} calls a month · input only` : 'Set a price to see this');
+  set('st-month', s ? fmtUSD(s.perMonth) : '–'); set('st-month-sub', s ? `If applied · at ${nf.format(prefs.calls)} calls a month · input only` : 'No price, so no dollar savings are shown');
 }
 
 function renderScore() {
@@ -241,18 +244,29 @@ function countingCell(m) {
   if (m.count === 'local') return '<span class="badge ok">Local tokenizer</span>';
   return '<span class="badge">Estimate only</span>';
 }
+const STATUS_CLASS = { verified: 'ok', reported: 'est', user: 'ai', unavailable: '' };
+function pricingCell(m) {
+  const p = m.pricing, src = p.source;
+  const detail = p.status === 'unavailable' ? p.reason : p.status === 'user' ? 'Entered by you; stored in this browser only.'
+    : `${src ? (src.url ? `<a href="${esc(src.url)}" target="_blank" rel="noopener noreferrer">${esc(src.label)}</a>` : esc(src.label)) : ''}${p.asOf ? ` · checked ${esc(p.asOf)}` : ''}${p.note ? ` · ${esc(p.note)}` : ''}`;
+  return `<span class="badge ${STATUS_CLASS[p.status]}">${esc(PRICING_STATUS[p.status])}</span><span class="mn">${p.status === 'unavailable' ? esc(detail) : detail}</span>`;
+}
 function renderModelsView() {
-  $('pricing-note').textContent = `${PRICING_NOTE} Defaults as of ${PRICING_AS_OF}. Edits are stored in this browser only.`;
+  $('pricing-note').textContent = `${PRICING_NOTE} Last verification: ${PRICING_AS_OF}. Edits are stored in this browser only.`;
   const cell = (m, k) => `<td><input type="number" min="0" step="any" data-model="${esc(m.id)}" data-k="${k}" aria-label="${esc(m.label)} ${k === 'in' ? 'input' : 'output'} price per million tokens" value="${m.price ? m.price[k] : ''}" placeholder="not set"></td>`;
-  $('price-table').tBodies[0].innerHTML = models.map((m) => `<tr><td><b>${esc(m.label)}</b>${m.edited ? ' <span class="tag">edited</span>' : ''}<span class="mn">${esc(m.vendor)}${m.note ? ' · ' + esc(m.note) : ''}</span></td><td>${countingCell(m)}</td>${cell(m, 'in')}${cell(m, 'out')}</tr>`).join('');
+  $('price-table').tBodies[0].innerHTML = models.map((m) => `<tr><td><b>${esc(m.label)}</b>${m.edited ? ' <span class="tag">edited</span>' : ''}${m.labelStatus === 'user-requested' ? ' <span class="tag">user-requested label</span>' : ''}
+    <span class="mn">${esc(m.vendor)}${m.reasoning ? ` · effort: ${esc(m.reasoning.levels.join(' / '))} (default ${esc(m.reasoning.default)}; output tokens only)` : ''}</span>
+    <span class="mn">${esc(modelIdLine(m))}</span>${m.note ? `<span class="mn">${esc(m.note)}</span>` : ''}</td>
+    <td>${countingCell(m)}<span class="mn">${esc(CONFIDENCE[m.confidence.level].label)}</span></td><td>${pricingCell(m)}</td>${cell(m, 'in')}${cell(m, 'out')}</tr>`).join('');
   $('calls').value = prefs.calls; $('outtok').value = prefs.out;
   const body = $('scenario-table').tBodies[0];
   if (!state.analyzed || !state.opt) { body.innerHTML = '<tr><td colspan="4" class="muted">Analyze a prompt in the Workspace to see costs for every model.</td></tr>'; return; }
   const b = estimateTokens(state.aText), a = estimateTokens(state.opt.text);
-  body.innerHTML = models.filter((m) => m.price).map((m) => {
+  body.innerHTML = models.map((m) => {
+    if (!m.price) return `<tr><td><b>${esc(m.label)}</b><span class="mn">${esc(pricingLine(m))}</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td></tr>`;
     const c0 = estimateCost({ tokens: b, outputTokens: prefs.out, price: m.price }), c1 = estimateCost({ tokens: a, outputTokens: prefs.out, price: m.price }), s = projectSavings({ before: b, after: a, calls: prefs.calls, price: m.price });
-    return `<tr><td><b>${esc(m.label)}</b></td><td class="num">${fmtUSD(c0.total)}</td><td class="num">${fmtUSD(c1.total)}</td><td class="num">${fmtUSD(s.perMonth)}</td></tr>`;
-  }).join('') || '<tr><td colspan="4" class="muted">No model has a price set.</td></tr>';
+    return `<tr><td><b>${esc(m.label)}</b><span class="mn">${esc(PRICING_STATUS[m.pricing.status])} price</span></td><td class="num">${fmtUSD(c0.total)}</td><td class="num">${fmtUSD(c1.total)}</td><td class="num">${fmtUSD(s.perMonth)}</td></tr>`;
+  }).join('');
 }
 
 function renderSettings() {
@@ -276,8 +290,10 @@ function updateButtons() {
   $('analyze').disabled = !has; $('optimize').disabled = !has;
   const mb = $('measure'); mb.disabled = state.busy.measure || !route || !has; mb.classList.toggle('busy', state.busy.measure);
   mb.title = route ? `Sends this prompt to ${route === 'local' ? 'the local tokenizer on this machine' : 'Anthropic, through your local server,'} to count tokens` : 'No exact counter for this model: estimates are shown instead.';
-  const m = cur(), r = counting.routeFor(m.id);
-  $('model-hint').textContent = r === 'local' ? 'Exact counting: local tokenizer' : r ? 'Exact counting available on request' : m.count === 'anthropic' ? 'Estimates only: exact counting needs a key on the server' : 'Estimates only for this model';
+  const s = sel(), m = s.profile, basis = tokenBasis(m, 'estimated', counting.routeFor(m.id));
+  $('model-hint').textContent = basis.label; $('model-hint').title = basis.detail;
+  $('model-basis').textContent = `${m.price ? pricingLine(m) : 'Pricing unavailable'}${s.effort ? ` · ${level(s.effort)} effort changes output tokens, not your prompt's input` : ''}`;
+  $('model-basis').title = `${m.price ? '' : `${pricingLine(m)}. `}${modelIdLine(m)}. ${s.effort ? EFFORT_NOTE : ''}`.trim();
 }
 
 function renderAll() { renderMeta(); renderStats(); renderScore(); renderSuggestions(); renderMarked(); renderCompare(); renderModelsView(); renderSettings(); updateButtons(); }
@@ -364,7 +380,6 @@ $('cmp-use').onclick = () => {
   toast(`Prompt replaced. Recounted against your original: ${nf.format(m.before)} → ${nf.format(m.after)} tokens (${m.saved > 0 ? '−' : m.saved < 0 ? '+' : ''}${nf.format(Math.abs(m.saved))}, ${m.kind}).`, m.saved >= 0 ? 'good' : 'info');
 };
 
-$('target-model').onchange = () => { prefs.model = $('target-model').value; save(); syncCounting(); refreshCounts(); renderAll(); };
 $('price-table').tBodies[0].addEventListener('change', (e) => {
   const id = e.target.dataset.model; if (!id) return;
   const row = e.target.closest('tr'), i = parseFloat(row.querySelector('[data-k=in]').value), o = parseFloat(row.querySelector('[data-k=out]').value);
@@ -377,18 +392,28 @@ numPref('calls', 'calls'); numPref('outtok', 'out');
 document.querySelectorAll('[data-theme-choice]').forEach((b) => { b.onclick = () => { prefs.theme = b.dataset.themeChoice; save(); applyTheme(); renderSettings(); }; });
 
 function syncCounting() { const id = cur().id; counting.setModel(counting.routeFor(id) ? id : null); }
-function fillModelSelect() {
-  const groups = {}; for (const m of models) (groups[m.vendor] ||= []).push(m);
-  $('target-model').innerHTML = Object.entries(groups).map(([v, ms]) => `<optgroup label="${esc(v)}">${ms.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}</optgroup>`).join('');
-  $('target-model').value = cur().id;
+const level = (l) => l[0].toUpperCase() + l.slice(1);
+function fillSelectors() { // provider -> model -> reasoning effort (shown only when the model has effort levels)
+  const s = sel(), r = s.profile.reasoning;
+  $('target-provider').innerHTML = providersOf(models).map((p) => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('');
+  $('target-provider').value = s.profile.provider;
+  $('target-model').innerHTML = modelsOf(models, s.profile.provider).map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('');
+  $('target-model').value = s.profile.id;
+  $('effort-pick').hidden = !r;
+  $('target-effort').innerHTML = r ? r.levels.map((l) => `<option value="${esc(l)}">${esc(level(l))}${l === r.default ? ' (default)' : ''}</option>`).join('') : '';
+  if (r) $('target-effort').value = s.effort;
 }
+const selectionChanged = () => { save(); fillSelectors(); syncCounting(); refreshCounts(); renderAll(); };
+$('target-provider').onchange = () => { Object.assign(prefs, selectProvider(models, prefs, $('target-provider').value)); selectionChanged(); };
+$('target-model').onchange = () => { Object.assign(prefs, selectModel(models, prefs, $('target-model').value)); selectionChanged(); };
+$('target-effort').onchange = () => { Object.assign(prefs, selectEffort(models, prefs, $('target-effort').value)); selectionChanged(); };
 
 // ------------------------------------------------------------------ boot
-applyTheme(); fillModelSelect(); go(VIEWS[location.hash.slice(1)] ? location.hash.slice(1) : 'workspace');
+applyTheme(); fillSelectors(); go(VIEWS[location.hash.slice(1)] ? location.hash.slice(1) : 'workspace');
 (async () => {
   await Promise.all([counting.init(), rewriter.init()]);
   counting.setLocalTokenizers(rewriter.tokenizers);
   models = buildModels(rewriter.tokenizers, prefs.pricing);
   if (!models.some((m) => m.id === prefs.model)) prefs.model = DEFAULT_PREFS.model;
-  fillModelSelect(); syncCounting(); renderAll();
+  fillSelectors(); syncCounting(); renderAll();
 })();

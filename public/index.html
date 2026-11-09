@@ -28,7 +28,12 @@
   <div class="main">
     <header class="top">
       <div class="titles"><h1 id="view-title">Workspace</h1><p id="view-sub" class="muted"></p></div>
-      <div class="model-pick"><label for="target-model">Target model</label><select id="target-model"></select><small id="model-hint" class="muted"></small></div>
+      <div class="model-pick cascade" role="group" aria-label="Target model">
+        <div class="pick"><label for="target-provider">Provider</label><select id="target-provider"></select></div>
+        <div class="pick"><label for="target-model">Model</label><select id="target-model"></select></div>
+        <div class="pick" id="effort-pick" hidden><label for="target-effort">Reasoning effort</label><select id="target-effort"></select></div>
+        <small id="model-hint" class="muted"></small><small id="model-basis" class="muted"></small>
+      </div>
     </header>
 
     <main id="main" tabindex="-1">
@@ -107,7 +112,7 @@
         <div class="card">
           <h2>Model pricing</h2>
           <p class="note" id="pricing-note"></p>
-          <div class="table-wrap"><table id="price-table"><thead><tr><th>Model</th><th>Exact counting</th><th>Input $ / M tokens</th><th>Output $ / M tokens</th></tr></thead><tbody></tbody></table></div>
+          <div class="table-wrap"><table id="price-table"><thead><tr><th>Model</th><th>Exact counting</th><th>Pricing status</th><th>Input $ / M tokens</th><th>Output $ / M tokens</th></tr></thead><tbody></tbody></table></div>
           <div class="row-actions"><button type="button" id="price-reset" class="btn ghost">Reset prices to defaults</button><span id="price-status" class="muted" role="status"></span></div>
         </div>
         <div class="card">

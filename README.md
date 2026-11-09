@@ -6,7 +6,7 @@ Find what your prompts waste, see what they cost, and trim them. **Free-first:**
 
 ## Run
     npm start        # http://localhost:5173  (set PORT to change)
-    npm test         # 140 tests; no network, no keys needed
+    npm test         # 162 tests; no network, no keys needed
 
 Requires Node 20+. No dependencies, no build step. Optional extras: `cp .env.example .env` and fill in what you want.
 
@@ -32,6 +32,13 @@ Requires Node 20+. No dependencies, no build step. Optional extras: `cp .env.exa
 | AI rewrite (Hugging Face) | `HF_TOKEN` + `HF_MODEL` | Hugging Face, via your server, **on click** | **AI suggestion** |
 
 No paid API is required for anything. API keys live in the server process only: they are never sent to the browser, returned by any route, written to logs, or included in error messages (tests spawn the real server and check this, including when a provider echoes the key back).
+
+## Models, providers and pricing
+Pick a **provider**, then a **model**, then a **reasoning effort** when the model has one. Everything comes from one registry (`public/models.js`): Claude (Sonnet / Opus / Haiku / Fable), Gemini 3.5 Flash-Lite, **Google Antigravity** (Gemini at Low / Medium / High), **OpenAI Codex** (Terra at Low / Medium / High, and Luna), your own custom model, and local tokenizers when installed.
+- **Terra and Luna are your labels, not pinned models.** They are real OpenAI tiers, but each exists in more than one generation, so no model id, tokenizer or price is assumed: candidates and their evidence are listed, counts are *fallback estimates*, and no price is shown until you enter one.
+- **Pricing has a status:** *Verified* (checked against the provider's page, with source and date: the Claude rates), *Reported* (third-party, unchecked), *Your price*, or *Unavailable* (no figures and no savings are shown). Antigravity is quota-metered, so it has no per-token price.
+- **Reasoning effort never changes your prompt's input tokens**; it affects output (reasoning) tokens and quota use.
+- Details, evidence and what is and is not verified: [`docs/MODELS.md`](docs/MODELS.md). QA results: [`docs/QA-REPORT-model-intelligence.md`](docs/QA-REPORT-model-intelligence.md).
 
 ## Measured vs estimated
 Every token number carries a badge. **Estimated** is the offline heuristic (`heuristic-v2`, assumed margin, not benchmarked against a real tokenizer). **Measured** appears only when a real counter answered for that exact text and model; edit one character, switch model, or change which edits are applied and it reverts to **Estimated**. Before/after savings are measured only if *both* texts were measured, never a measured number minus an estimate. A measured Anthropic count is the API's answer for the text as a single user message; Anthropic itself calls it an estimate that can differ slightly from billing, so it is marked `exact: false`. AI rewrites and cost figures are always estimates. Characters, words and bytes are exact facts.
@@ -96,7 +103,7 @@ Limits: the concept lexicon is small and English-only, so unlisted wording (`any
 Only edits are applied; advice never is. Code, quoted text, URLs, `{{variables}}` and `<tags>` are never edited. Requirement markers (negations, limits, numbers, formats, quoted strings, URLs, identifiers) are tracked; an edit that would lose one is protected or reverted and reported. Edits in sentences that state requirements start unchecked.
 
 ## Verification status (read this)
-- **Automated (`npm test`, 140 tests, 139 pass, 1 skipped):** analysis engine, pricing and diff maths, server API, provider adapters, error mapping, rate limits, secret-leak checks that spawn the real server, client modules, and static UI contract checks. All use mocked upstreams.
+- **Automated (`npm test`, 162 tests, 161 pass, 1 skipped):** analysis engine, pricing and diff maths, server API, provider adapters, error mapping, rate limits, secret-leak checks that spawn the real server, client modules, and static UI contract checks. All use mocked upstreams.
 - **Browser:** the UI was exercised in a headless browser against the real server with local stand-ins for Anthropic and Gemini (offline, keyed, failing and dropped-requirement scenarios; three viewport sizes; no horizontal overflow or console errors). Screenshots are in `docs/screenshots/`.
 - **Not verified here:** the live Anthropic, Gemini and Hugging Face APIs, a running Ollama, and the `gpt-tokenizer` package (no network or keys were available, and packages cannot be installed offline). Verify with your own configuration:
 
